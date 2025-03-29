@@ -42,20 +42,19 @@ def load_blocklist():
 def save_blocklist(blocklist):
     save_json(BLOCKLIST_FILE, blocklist)
 
+# 🔹 Add a Device
+def add_device(ip, mac, name, role):
+    devices = load_devices()
+    devices[mac] = {"IP": ip, "Name": name, "Role": role}
+    save_devices(devices)
+    print(f"[+] Device {name} ({ip} - {role}) added!")
+
 # 🔹 Get Device Name
 def get_device_name(ip):
     try:
-        return socket.gethostbyaddr(ip)[0]
+        return socket.gethostbyaddr(ip)[0]  # Fetch device hostname
     except socket.herror:
-        return "Unknown"
-
-# 🔹 Add a Device
-def add_device(ip, mac, role):
-    devices = load_devices()
-    device_name = get_device_name(ip)
-    devices[mac] = {"IP": ip, "Role": role, "Name": device_name}
-    save_devices(devices)
-    print(f"[+] Device {device_name} ({ip}, {role}) added!")
+        return "Unknown Device"
 
 # 🔹 Scan the Network
 def get_local_ip():
@@ -90,15 +89,46 @@ def detect_unauthorized_devices():
     with open(UNAUTHORIZED_LOG, "a") as log_file:
         for device in current_devices:
             mac = device["MAC"]
-            name = device["Name"]
             if mac not in known_devices:
                 unauthorized_found = True
-                alert_message = f"[!] Unauthorized Device Detected: {name} (IP {device['IP']} | MAC {mac})\n"
+                alert_message = f"[!] Unauthorized Device Detected: {device['Name']} (IP {device['IP']}, MAC {mac})\n"
                 print(alert_message)
                 log_file.write(f"{datetime.now()} - {alert_message}")
 
     if not unauthorized_found:
         print("[✓] No unauthorized devices found.")
+
+# 🔹 Website Blocking
+def update_hosts(blocklist):
+    try:
+        with open(HOSTS_FILE, "r+") as file:
+            lines = file.readlines()
+            file.seek(0)
+            for line in lines:
+                if not any(site in line for site in blocklist):
+                    file.write(line)
+            for site in blocklist:
+                file.write(f"{REDIRECT_IP} {site}\n")
+            file.truncate()
+        print("✅ Website blocking updated!")
+    except PermissionError:
+        print("❌ Run as root (sudo) to modify hosts file.")
+
+def add_website(site):
+    blocklist = load_blocklist()
+    if site not in blocklist:
+        blocklist.append(site)
+        save_blocklist(blocklist)
+        update_hosts(blocklist)
+        print(f"✅ {site} added to blocklist.")
+
+def remove_website(site):
+    blocklist = load_blocklist()
+    if site in blocklist:
+        blocklist.remove(site)
+        save_blocklist(blocklist)
+        update_hosts(blocklist)
+        print(f"✅ {site} removed from blocklist.")
 
 # 🔹 Internet Access Control
 def is_access_allowed():
@@ -124,33 +154,62 @@ def enforce_firewall():
             block_internet()
         time.sleep(60)
 
+# 🔹 Traffic Monitoring
+def log_traffic():
+    print("[*] Monitoring network traffic...")
+    while True:
+        packets = scapy.sniff(count=10, timeout=5)
+        with open(TRAFFIC_LOG, "a") as f:
+            for pkt in packets:
+                f.write(f"{datetime.now()} - {pkt.summary()}\n")
+        time.sleep(5)
+
 # 🎯 CLI Interface
 def menu():
     while True:
         print("\n🔥 Advanced Parental Control Firewall 🔥")
         print("1️⃣  Scan Network")
         print("2️⃣  Add Device")
-        print("3️⃣  Start Firewall")
-        print("4️⃣  Detect Unauthorized Devices")
-        print("5️⃣  Exit")
+        print("3️⃣  Block a Website")
+        print("4️⃣  Unblock a Website")
+        print("5️⃣  Show Blocked Websites")
+        print("6️⃣  Start Firewall")
+        print("7️⃣  Monitor Traffic")
+        print("8️⃣  Detect Unauthorized Devices")
+        print("9️⃣  Exit")
         
         choice = input("Choose an option: ")
         
         if choice == "1":
             devices = scan_network()
+            print("\n📡 Network Devices:")
             for d in devices:
-                print(f"Device: {d['Name']} | IP: {d['IP']} | MAC: {d['MAC']}")
+                print(f"🔹 Name: {d['Name']} | IP: {d['IP']} | MAC: {d['MAC']}")
         elif choice == "2":
             ip = input("Enter Device IP: ")
             mac = input("Enter Device MAC: ")
+            name = input("Enter Device Name: ")
             role = input("Enter Role (Restricted/Allowed): ")
-            add_device(ip, mac, role)
+            add_device(ip, mac, name, role)
         elif choice == "3":
+            site = input("Enter website (e.g., youtube.com): ")
+            add_website(site)
+        elif choice == "4":
+            site = input("Enter website to unblock: ")
+            remove_website(site)
+        elif choice == "5":
+            print("\n🔒 Blocked Websites:")
+            for site in load_blocklist():
+                print(f" - {site}")
+        elif choice == "6":
             print("[*] Firewall started...")
             threading.Thread(target=enforce_firewall, daemon=True).start()
-        elif choice == "4":
+        elif choice == "7":
+            print("[*] Traffic monitoring started...")
+            threading.Thread(target=log_traffic, daemon=True).start()
+        elif choice == "8":
             detect_unauthorized_devices()
-        elif choice == "5":
+        elif choice == "9":
             print("[+] Exiting...")
             break
         else:
