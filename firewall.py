@@ -10,19 +10,20 @@ from datetime import datetime
 DEVICE_FILE = "device_profiles.json"
 BLOCKLIST_FILE = "blocklist.json"
 TRAFFIC_LOG = "traffic_log.txt"
+UNAUTHORIZED_LOG = "unauthorized_devices.txt"
 
 # 🔹 Firewall Rules
 BLOCKED_HOURS = [(22, 7)]  # Example: Block from 10 PM to 7 AM
 HOSTS_FILE = "/etc/hosts"
 REDIRECT_IP = "127.0.0.1"
 
-# 📌 Load & Save Device Data
+# 📌 Load & Save JSON Data
 def load_json(file):
     try:
         with open(file, "r") as f:
             return json.load(f)
     except FileNotFoundError:
-        return []
+        return {}
 
 def save_json(file, data):
     with open(file, "w") as f:
@@ -69,6 +70,25 @@ def scan_network():
         mac = response[1].hwsrc
         devices.append({"IP": ip, "MAC": mac})
     return devices
+
+# 🔹 Unauthorized Device Detection
+def detect_unauthorized_devices():
+    print("[*] Checking for unauthorized devices...")
+    known_devices = load_devices()
+    current_devices = scan_network()
+
+    unauthorized_found = False
+    with open(UNAUTHORIZED_LOG, "a") as log_file:
+        for device in current_devices:
+            mac = device["MAC"]
+            if mac not in known_devices:
+                unauthorized_found = True
+                alert_message = f"[!] Unauthorized Device Detected: IP {device['IP']} | MAC {mac}\n"
+                print(alert_message)
+                log_file.write(f"{datetime.now()} - {alert_message}")
+
+    if not unauthorized_found:
+        print("[✓] No unauthorized devices found.")
 
 # 🔹 Website Blocking
 def update_hosts(blocklist):
@@ -147,7 +167,8 @@ def menu():
         print("5️⃣  Show Blocked Websites")
         print("6️⃣  Start Firewall")
         print("7️⃣  Monitor Traffic")
-        print("8️⃣  Exit")
+        print("8️⃣  Detect Unauthorized Devices")
+        print("9️⃣  Exit")
         
         choice = input("Choose an option: ")
         
@@ -177,6 +198,8 @@ def menu():
             print("[*] Traffic monitoring started...")
             threading.Thread(target=log_traffic, daemon=True).start()
         elif choice == "8":
+            detect_unauthorized_devices()
+        elif choice == "9":
             print("[+] Exiting...")
             break
         else:
