@@ -52,7 +52,7 @@ def add_device(ip, mac, name, role):
 # 🔹 Get Device Name
 def get_device_name(ip):
     try:
-        return socket.gethostbyaddr(ip)[0]  # Fetch device hostname
+        return socket.gethostbyaddr(ip)[0]
     except socket.herror:
         return "Unknown Device"
 
@@ -154,15 +154,40 @@ def enforce_firewall():
             block_internet()
         time.sleep(60)
 
-# 🔹 Traffic Monitoring
+# 🔹 Traffic Monitoring (Fixed)
 def log_traffic():
-    print("[*] Monitoring network traffic...")
-    while True:
-        packets = scapy.sniff(count=10, timeout=5)
-        with open(TRAFFIC_LOG, "a") as f:
-            for pkt in packets:
-                f.write(f"{datetime.now()} - {pkt.summary()}\n")
-        time.sleep(5)
+    def process_packet(pkt):
+        try:
+            with open(TRAFFIC_LOG, "a") as f:
+                if pkt.haslayer(scapy.IP):
+                    src_ip = pkt[scapy.IP].src
+                    dst_ip = pkt[scapy.IP].dst
+                    protocol = pkt[scapy.IP].proto
+
+                    src_mac = pkt[scapy.Ether].src if pkt.haslayer(scapy.Ether) else "Unknown"
+                    dst_mac = pkt[scapy.Ether].dst if pkt.haslayer(scapy.Ether) else "Unknown"
+
+                    src_port = pkt[scapy.TCP].sport if pkt.haslayer(scapy.TCP) else (
+                        pkt[scapy.UDP].sport if pkt.haslayer(scapy.UDP) else "N/A"
+                    )
+                    dst_port = pkt[scapy.TCP].dport if pkt.haslayer(scapy.TCP) else (
+                        pkt[scapy.UDP].dport if pkt.haslayer(scapy.UDP) else "N/A"
+                    )
+
+                    log_entry = f"{datetime.now()} | Protocol: {protocol} | {src_ip}:{src_port} ({src_mac}) → {dst_ip}:{dst_port} ({dst_mac})\n"
+                    f.write(log_entry)
+        except Exception as e:
+            print(f"[!] Logging Error: {e}")
+
+    try:
+        print("[*] Monitoring network traffic (TCP/UDP/ICMP)... (Requires sudo)")
+        scapy.sniff(filter="tcp or udp or icmp", prn=process_packet, store=False, iface="eth0")
+    except Exception as e:
+        print(f"[!] Sniffing Error: {e}")
+
+def start_monitoring():
+    threading.Thread(target=log_traffic, daemon=True).start()
+    print("[✓] Traffic Monitoring Started.")
 
 # 🎯 CLI Interface
 def menu():
@@ -182,39 +207,26 @@ def menu():
         
         if choice == "1":
             devices = scan_network()
-            print("\n📡 Network Devices:")
             for d in devices:
                 print(f"🔹 Name: {d['Name']} | IP: {d['IP']} | MAC: {d['MAC']}")
         elif choice == "2":
-            ip = input("Enter Device IP: ")
-            mac = input("Enter Device MAC: ")
-            name = input("Enter Device Name: ")
-            role = input("Enter Role (Restricted/Allowed): ")
-            add_device(ip, mac, name, role)
+            add_device(input("IP: "), input("MAC: "), input("Name: "), input("Role: "))
         elif choice == "3":
-            site = input("Enter website (e.g., youtube.com): ")
-            add_website(site)
+            add_website(input("Website: "))
         elif choice == "4":
-            site = input("Enter website to unblock: ")
-            remove_website(site)
+            remove_website(input("Website: "))
         elif choice == "5":
-            print("\n🔒 Blocked Websites:")
-            for site in load_blocklist():
-                print(f" - {site}")
+            print("\n🔒 Blocked Websites:", load_blocklist())
         elif choice == "6":
-            print("[*] Firewall started...")
             threading.Thread(target=enforce_firewall, daemon=True).start()
         elif choice == "7":
-            print("[*] Traffic monitoring started...")
-            threading.Thread(target=log_traffic, daemon=True).start()
+            start_monitoring()
         elif choice == "8":
             detect_unauthorized_devices()
         elif choice == "9":
-            print("[+] Exiting...")
             break
         else:
             print("[!] Invalid option!")
 
-# 🚀 Run CLI
 if __name__ == "__main__":
     menu()
