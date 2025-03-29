@@ -42,21 +42,20 @@ def load_blocklist():
 def save_blocklist(blocklist):
     save_json(BLOCKLIST_FILE, blocklist)
 
-# 🔹 Add a Device
+# 🔹 Device Management
 def add_device(ip, mac, name, role):
     devices = load_devices()
     devices[mac] = {"IP": ip, "Name": name, "Role": role}
     save_devices(devices)
     print(f"[+] Device {name} ({ip} - {role}) added!")
 
-# 🔹 Get Device Name
 def get_device_name(ip):
     try:
         return socket.gethostbyaddr(ip)[0]
     except socket.herror:
         return "Unknown Device"
 
-# 🔹 Scan the Network
+# 🔹 Network Scanning
 def get_local_ip():
     try:
         return socket.gethostbyname(socket.gethostname())[:-1] + "1/24"
@@ -70,31 +69,24 @@ def scan_network():
     broadcast = scapy.Ether(dst="ff:ff:ff:ff:ff:ff")
     packet = broadcast / arp_request
     answered = scapy.srp(packet, timeout=2, verbose=False)[0]
-
-    devices = []
-    for response in answered:
-        ip = response[1].psrc
-        mac = response[1].hwsrc
-        name = get_device_name(ip)
-        devices.append({"IP": ip, "MAC": mac, "Name": name})
-    return devices
+    
+    return [{"IP": response[1].psrc, "MAC": response[1].hwsrc, "Name": get_device_name(response[1].psrc)} for response in answered]
 
 # 🔹 Unauthorized Device Detection
 def detect_unauthorized_devices():
     print("[*] Checking for unauthorized devices...")
     known_devices = load_devices()
     current_devices = scan_network()
-
     unauthorized_found = False
+    
     with open(UNAUTHORIZED_LOG, "a") as log_file:
         for device in current_devices:
-            mac = device["MAC"]
-            if mac not in known_devices:
+            if device["MAC"] not in known_devices:
                 unauthorized_found = True
-                alert_message = f"[!] Unauthorized Device Detected: {device['Name']} (IP {device['IP']}, MAC {mac})\n"
+                alert_message = f"[!] Unauthorized Device Detected: {device['Name']} (IP {device['IP']}, MAC {device['MAC']})\n"
                 print(alert_message)
                 log_file.write(f"{datetime.now()} - {alert_message}")
-
+    
     if not unauthorized_found:
         print("[✓] No unauthorized devices found.")
 
@@ -130,13 +122,10 @@ def remove_website(site):
         update_hosts(blocklist)
         print(f"✅ {site} removed from blocklist.")
 
-# 🔹 Internet Access Control
+# 🔹 Firewall Enforcement
 def is_access_allowed():
     current_hour = datetime.now().hour
-    for start, end in BLOCKED_HOURS:
-        if start <= current_hour or current_hour < end:
-            return False
-    return True
+    return not any(start <= current_hour or current_hour < end for start, end in BLOCKED_HOURS)
 
 def block_internet():
     os.system("sudo iptables -A OUTPUT -j DROP")
@@ -148,42 +137,22 @@ def allow_internet():
 
 def enforce_firewall():
     while True:
-        if is_access_allowed():
-            allow_internet()
-        else:
-            block_internet()
+        allow_internet() if is_access_allowed() else block_internet()
         time.sleep(60)
 
-# 🔹 Traffic Monitoring (Fixed)
+# 🔹 Traffic Monitoring
 def log_traffic():
     def process_packet(pkt):
         try:
-            with open(TRAFFIC_LOG, "a") as f:
-                if pkt.haslayer(scapy.IP):
-                    src_ip = pkt[scapy.IP].src
-                    dst_ip = pkt[scapy.IP].dst
-                    protocol = pkt[scapy.IP].proto
-
-                    src_mac = pkt[scapy.Ether].src if pkt.haslayer(scapy.Ether) else "Unknown"
-                    dst_mac = pkt[scapy.Ether].dst if pkt.haslayer(scapy.Ether) else "Unknown"
-
-                    src_port = pkt[scapy.TCP].sport if pkt.haslayer(scapy.TCP) else (
-                        pkt[scapy.UDP].sport if pkt.haslayer(scapy.UDP) else "N/A"
-                    )
-                    dst_port = pkt[scapy.TCP].dport if pkt.haslayer(scapy.TCP) else (
-                        pkt[scapy.UDP].dport if pkt.haslayer(scapy.UDP) else "N/A"
-                    )
-
-                    log_entry = f"{datetime.now()} | Protocol: {protocol} | {src_ip}:{src_port} ({src_mac}) → {dst_ip}:{dst_port} ({dst_mac})\n"
+            if pkt.haslayer(scapy.IP):
+                with open(TRAFFIC_LOG, "a") as f:
+                    log_entry = f"{datetime.now()} | {pkt[scapy.IP].src} -> {pkt[scapy.IP].dst}\n"
                     f.write(log_entry)
         except Exception as e:
             print(f"[!] Logging Error: {e}")
-
-    try:
-        print("[*] Monitoring network traffic (TCP/UDP/ICMP)... (Requires sudo)")
-        scapy.sniff(filter="tcp or udp or icmp", prn=process_packet, store=False, iface="eth0")
-    except Exception as e:
-        print(f"[!] Sniffing Error: {e}")
+    
+    print("[*] Monitoring network traffic... (Requires sudo)")
+    scapy.sniff(filter="tcp or udp or icmp", prn=process_packet, store=False, iface="eth0")
 
 def start_monitoring():
     threading.Thread(target=log_traffic, daemon=True).start()
@@ -193,22 +162,18 @@ def start_monitoring():
 def menu():
     while True:
         print("\n🔥 Advanced Parental Control Firewall 🔥")
-        print("1️⃣  Scan Network")
-        print("2️⃣  Add Device")
-        print("3️⃣  Block a Website")
-        print("4️⃣  Unblock a Website")
-        print("5️⃣  Show Blocked Websites")
-        print("6️⃣  Start Firewall")
-        print("7️⃣  Monitor Traffic")
-        print("8️⃣  Detect Unauthorized Devices")
-        print("9️⃣  Exit")
+        options = [
+            "Scan Network", "Add Device", "Block a Website", "Unblock a Website",
+            "Show Blocked Websites", "Start Firewall", "Monitor Traffic", "Detect Unauthorized Devices", "Exit"
+        ]
+        
+        for i, option in enumerate(options, 1):
+            print(f"{i}️⃣  {option}")
         
         choice = input("Choose an option: ")
-        
         if choice == "1":
-            devices = scan_network()
-            for d in devices:
-                print(f"🔹 Name: {d['Name']} | IP: {d['IP']} | MAC: {d['MAC']}")
+            for d in scan_network():
+                print(f"🔹 {d['Name']} | {d['IP']} | {d['MAC']}")
         elif choice == "2":
             add_device(input("IP: "), input("MAC: "), input("Name: "), input("Role: "))
         elif choice == "3":
